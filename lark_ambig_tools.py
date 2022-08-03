@@ -18,6 +18,14 @@ T = TypeVar("T")
 
 
 class CountedTree(Tree):
+    """A tree subclass with an additional attribute, ``derivation_count``, that
+    represents the total number of possible derivations of this tree.
+    Derivations are counted based on the number and position of '_ambig' nodes.
+
+    Take caution using the constructor directly. All tree children must be
+    instances of ``CountedTree`` for the derivation count to be accurate.
+    Changing the children after construction will not update the derivation count.
+    """
     def __init__(self, data, children, meta=None):
         super().__init__(data, children, meta)
         derivation_counts = map(_get_derivation_count, children)
@@ -25,6 +33,7 @@ class CountedTree(Tree):
 
 
 class CountTrees(Transformer):
+    """A transformer that transforms a ``Tree`` into a ``CountedTree``."""
     def __default__(self, data, children, meta):
         return CountedTree(data, children, meta)
 
@@ -34,10 +43,18 @@ def _get_derivation_count(tree: Any) -> int:
 
 
 def _repeat_each(iterable: Iterable[T], n: int) -> Iterator[T]:
+    """Repeat each element of the iterable n times.
+
+    Recipe from more-itertools: https://github.com/more-itertools/more-itertools
+    """
     return chain.from_iterable(map(repeat, iterable, repeat(n)))
 
 
 def _ncycles(iterable: Iterable[T], n: int) -> Iterator[T]:
+    """Return the elements of the iterable n times.
+
+    This implementation evaluates the elements of the iterable lazily.
+    """
     if n > 0:
         saved = []
         for element in iterable:
@@ -47,6 +64,16 @@ def _ncycles(iterable: Iterable[T], n: int) -> Iterator[T]:
 
 
 def _lazy_product(iterables: Collection[Iterable[T]], lengths: Collection[int]) -> Iterator[Tuple[T, ...]]:
+    """Return the Cartesian Product of the iterables of the given lengths.
+
+    This implementation takes advantage of the known lengths of the iterables
+    to evaluate the iterables lazily in contrast to ``itertools.product``.
+    This function generates tuples in the same order as ``itertools.product``.
+
+    Preconditions: ``len(iterables) == len(lengths)`` and ``lengths[i]`` is the
+    number of calls of `next` on an iterator of `iterables[i]` before
+    ``StopIteration`` is raised.
+    """
     cycle_count = 1
     repeat_count = prod(lengths)
     iterators = []
@@ -58,6 +85,19 @@ def _lazy_product(iterables: Collection[Iterable[T]], lengths: Collection[int]) 
 
 
 class Disambiguator(Interpreter):
+    """An Interpreter that iterates over the unambiguous derivations of an
+    ambiguous tree (one containing '_ambig' nodes).
+
+    By lazily constructing trees, ``Disambiguator`` is more computationally and
+    memory efficient than ``lark.visitors.CollapseAmbiguities``.
+
+    When visiting a ``CountedTree``, ``Disambiguator`` takes advantage of the
+    known derivation counts to be even more lazy and is ideal for the case in
+    which you only need to find one tree that meets your requirements.
+
+    If you are always going to iterate over all possible derivations, it is
+    slightly faster to visit a regular ``Tree``.
+    """
     def _ambig(self, tree: Tree) -> Iterator[Tree]:
         for child in tree.children:
             yield from self.visit(child)
